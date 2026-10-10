@@ -1,6 +1,7 @@
 package logica;
 
 import modelo.Cliente;
+import modelo.EstadoSolicitud;
 import modelo.SolicitudCredito;
 
 import java.math.BigDecimal;
@@ -10,6 +11,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -20,19 +22,18 @@ import java.util.Set;
  *   la persistencia en memoria y las reglas de negocio de la interfaz de consola (Sección 15).
  * - Requisito 1 (Colección Principal - ArrayList):
  *   Almacena el historial general de solicitudes radicadas en el sistema.
- *   - ¿Por qué conserva orden?: Mantiene el orden de radicación temporal (secuencia de llegada).
- *   - ¿Por qué ArrayList?: Ofrece acceso indexado en tiempo constante O(1), bajo consumo de
- *     memoria por elemento frente a nodos enlazados, e iteraciones de alto rendimiento.
  * - Requisito 2 (Control de Duplicados - HashSet):
- *   Controla la unicidad de los clientes según su número de documento.
- *   - ¿Por qué HashSet?: Gracias a su dispersión por código hash (hashCode y equals), comprueba e
- *     inserta elementos únicos en O(1) promedio. Si se intenta ingresar un documento repetido,
- *     el método set.add() retorna false de forma inmediata, permitiendo rechazar la duplicidad.
+ *   Controla la unicidad de los clientes según su número de documento en O(1) promedio.
  * - Requisito 3 (Búsqueda Directa por Clave - HashMap):
- *   Asocia cada código único 'numeroSolicitud' con su objeto SolicitudCredito.
- *   - ¿Por qué HashMap?: Permite localizar instantáneamente cualquier solicitud en tiempo O(1)
- *     promedio mediante su función hash interna, superando radicalmente la búsqueda lineal O(n)
- *     que implicaría recorrer elemento por elemento la lista general.
+ *   Asocia cada código único 'numeroSolicitud' con su objeto SolicitudCredito en O(1).
+ * - Requisito 5 (Procesamiento por Prioridad - PriorityQueue):
+ *   Gestiona la cola de evaluación bancaria mediante un montículo binario (heap) gobernado
+ *   por ComparadorPrioridadEvaluacion.
+ *   - ¿Por qué no FIFO ordinaria?: En banca, los casos de alta prioridad o urgencia deben ser
+ *     estudiados con prelación antes que trámites ordinarios registrados previamente.
+ *   - ¿Cómo determina cuál sale primero?: La PriorityQueue evalúa la cima del heap binario.
+ *     El Comparator ubica en la raíz la solicitud con mayor peso jerárquico (URGENTE > ALTA > MEDIA > BAJA),
+ *     desempatando por orden cronológico de llegada (FIFO) ante empates de nivel.
  */
 public class GestorCredito {
 
@@ -48,19 +49,19 @@ public class GestorCredito {
     // Requisito 3: Indice asociativo para recuperacion instantanea O(1) por clave unica
     private final Map<String, SolicitudCredito> solicitudesPorNumero;
 
+    // Requisito 5: Cola con prioridad gobernada por heap binario y Comparator
+    private final PriorityQueue<SolicitudCredito> colaPrioridadEvaluacion;
+
     public GestorCredito() {
         this.listaGeneralSolicitudes = new ArrayList<>();
         this.documentosClientesUnicos = new HashSet<>();
         this.clientesRegistrados = new HashSet<>();
         this.solicitudesPorNumero = new HashMap<>();
+        this.colaPrioridadEvaluacion = new PriorityQueue<>(new ComparadorPrioridadEvaluacion());
     }
 
     /**
      * Registra un nuevo cliente en el sistema verificando que su documento no exista previamente.
-     * 
-     * Demostración para sustentación (Requisito 2):
-     * El método 'documentosClientesUnicos.add(documento)' verifica e inserta en un solo paso.
-     * Si retorna false, significa que la tabla hash ya contenía ese documento, impidiendo duplicados.
      * 
      * @param nuevoCliente Cliente a registrar.
      * @return true si el cliente fue registrado con éxito.
@@ -84,13 +85,8 @@ public class GestorCredito {
     }
 
     /**
-     * Radica una nueva solicitud de crédito sincronizándola en la lista general y en el Map asociativo.
-     * 
-     * Demostración para sustentación (Requisitos 1, 2 y 3):
-     * 1. Verifica en O(1) en el Map si el número de solicitud ya existe para evitar colisiones de clave.
-     * 2. Si el cliente no existía, lo almacena en el Set de clientes únicos.
-     * 3. Registra en el ArrayList maestro conservando el momento cronológico de llegada.
-     * 4. Asocia la clave única al objeto en el HashMap (solicitudesPorNumero.put).
+     * Radica una nueva solicitud de crédito sincronizándola en la lista general, en el Map
+     * y, si su estado inicial es PENDIENTE o EN_EVALUACION, en la PriorityQueue de evaluación.
      * 
      * @param solicitud Solicitud a radicar.
      * @return true si la solicitud fue registrada.
@@ -103,7 +99,6 @@ public class GestorCredito {
 
         String codigo = solicitud.getNumeroSolicitud();
 
-        // Verificación O(1) en el HashMap para evitar colisión de claves únicas
         if (this.solicitudesPorNumero.containsKey(codigo)) {
             throw new SolicitudDuplicadaException(
                     "Ya existe una solicitud radicada con el número [" + codigo + "].");
@@ -122,17 +117,16 @@ public class GestorCredito {
         // Sincronización en el índice de búsqueda Map (Requisito 3)
         this.solicitudesPorNumero.put(codigo, solicitud);
 
+        // Si requiere trámite de evaluación, se encola en la PriorityQueue (Requisito 5)
+        if (solicitud.getEstado() == EstadoSolicitud.PENDIENTE || solicitud.getEstado() == EstadoSolicitud.EN_EVALUACION) {
+            this.colaPrioridadEvaluacion.add(solicitud);
+        }
+
         return true;
     }
 
     /**
      * Búsqueda directa por identificador en tiempo O(1) promedio utilizando el HashMap.
-     * 
-     * Pregunta de sustentación (Sección 9 y 25):
-     * ¿Por qué es conceptualmente diferente a recorrer una lista?
-     * En una lista secuencial, encontrar un elemento en la posición N requiere N comparaciones (O(n)).
-     * En el HashMap, la clave pasa por una función de dispersión (hash) que calcula de forma
-     * matemática directa el índice de la cubeta (bucket), accediendo al registro en tiempo O(1).
      * 
      * @param numeroSolicitud Código único a buscar.
      * @return Objeto SolicitudCredito encontrado.
@@ -155,6 +149,63 @@ public class GestorCredito {
     }
 
     /**
+     * Encola una solicitud existente en la PriorityQueue de evaluación crediticia.
+     */
+    public boolean encolarParaEvaluacion(String numeroSolicitud) {
+        SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
+        
+        // Evita re-encolar si ya está en la cola
+        if (this.colaPrioridadEvaluacion.contains(solicitud)) {
+            throw new IllegalStateException("La solicitud [" + numeroSolicitud + "] ya se encuentra en la cola de evaluación.");
+        }
+
+        solicitud.setEstado(EstadoSolicitud.EN_EVALUACION);
+        return this.colaPrioridadEvaluacion.add(solicitud);
+    }
+
+    /**
+     * Consulta la siguiente solicitud que encabeza la PriorityQueue sin retirarla (peek).
+     * 
+     * @return Próxima solicitud prioritaria a ser atendida, o null si la cola está vacía.
+     */
+    public SolicitudCredito consultarProximaPrioritaria() {
+        return this.colaPrioridadEvaluacion.peek();
+    }
+
+    /**
+     * Despacha y atiende la siguiente solicitud prioritaria retirándola del heap con poll().
+     * Actualiza el estado y mantiene la sincronización transaccional con la lista y el mapa.
+     * 
+     * Demostración para sustentación (Requisito 5):
+     * Demuestra que el elemento extraído por poll() responde al criterio jerárquico del Comparator
+     * y no al orden cronológico simple en que fueron agregados a la cola.
+     * 
+     * @param nuevoEstado Estado definitivo asignado (APROBADA, RECHAZADA o EN_EVALUACION).
+     * @param dictamenComite Observaciones o justificación del comité crediticio.
+     * @return La solicitud evaluada y retirada de la cola prioritaria.
+     */
+    public SolicitudCredito atenderProximaSolicitudPrioritaria(EstadoSolicitud nuevoEstado, String dictamenComite) {
+        if (this.colaPrioridadEvaluacion.isEmpty()) {
+            throw new IllegalStateException("No hay solicitudes pendientes en la cola de evaluación prioritaria.");
+        }
+
+        if (nuevoEstado == null) {
+            throw new IllegalArgumentException("El nuevo estado no puede ser nulo.");
+        }
+
+        // Extracción del elemento prioritario de la raíz del heap binario en O(log n)
+        SolicitudCredito atendida = this.colaPrioridadEvaluacion.poll();
+
+        // Actualización de estado y observaciones en el objeto vivo
+        atendida.setEstado(nuevoEstado);
+        if (dictamenComite != null && !dictamenComite.trim().isEmpty()) {
+            atendida.setObservaciones(dictamenComite.trim());
+        }
+
+        return atendida;
+    }
+
+    /**
      * Comprueba en O(1) si existe una solicitud radicada con la clave dada.
      */
     public boolean existeSolicitudPorNumero(String numeroSolicitud) {
@@ -163,11 +214,7 @@ public class GestorCredito {
     }
 
     /**
-     * Modifica atributos financieros de una solicitud existente manteniendo consistencia en el Map.
-     * 
-     * Demostración para sustentación (Sección 12):
-     * Al modificar atributos del objeto, como el Map almacena referencias, el objeto consultado
-     * por clave refleja de inmediato el cambio.
+     * Modifica atributos financieros de una solicitud existente manteniendo consistencia.
      */
     public void modificarCondicionesCredito(String numeroSolicitud, BigDecimal nuevoMonto, int nuevoPlazo) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
@@ -176,9 +223,7 @@ public class GestorCredito {
     }
 
     /**
-     * Control de modificación de clave en Map (Requisito de rúbrica Sección 12):
-     * Si por auditoría se actualiza el código de radicación, debe retirarse la asociación anterior
-     * y registrarse la nueva para evitar inconsistencias o duplicidades huérfanas en el HashMap.
+     * Reasignación de código único controlando la clave en el Map y sincronizando la cola.
      */
     public void reasignarCodigoSolicitud(String codigoAnterior, String nuevoCodigo) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(codigoAnterior);
@@ -189,10 +234,11 @@ public class GestorCredito {
                     "El nuevo código [" + claveNueva + "] ya está ocupado por otra solicitud.");
         }
 
-        // Retiro de la clave previa y registro con la nueva clave en el Map
+        boolean estabaEnCola = this.colaPrioridadEvaluacion.remove(solicitud);
+
+        // Retiro de la clave previa
         this.solicitudesPorNumero.remove(solicitud.getNumeroSolicitud());
-        
-        // Creamos la versión actualizada reemplazando la referencia en la lista
+
         SolicitudCredito solicitudActualizada = new SolicitudCredito(
                 claveNueva,
                 solicitud.getCliente(),
@@ -211,15 +257,22 @@ public class GestorCredito {
         }
 
         this.solicitudesPorNumero.put(claveNueva, solicitudActualizada);
+
+        if (estabaEnCola) {
+            this.colaPrioridadEvaluacion.add(solicitudActualizada);
+        }
     }
 
     /**
-     * Elimina una solicitud manteniendo la sincronización entre colecciones (Sección 12 y 13).
-     * Se retira del HashMap y del ArrayList general.
+     * Elimina una solicitud manteniendo sincronización estricta entre todas las colecciones (Sección 13).
+     * Se desvincula del Map, del ArrayList general y de la PriorityQueue si aún estaba encolada.
      */
     public boolean eliminarSolicitud(String numeroSolicitud) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
-        
+
+        // Desvinculación de la cola de prioridad si aún estaba pendiente
+        this.colaPrioridadEvaluacion.remove(solicitud);
+
         // Desvinculación del Map
         this.solicitudesPorNumero.remove(solicitud.getNumeroSolicitud());
 
@@ -230,29 +283,30 @@ public class GestorCredito {
     }
 
     /**
-     * Retorna una vista de solo lectura de todas las solicitudes radicadas.
+     * Retorna una lista con los elementos actuales de la PriorityQueue ordenados según su turno de atención.
+     * Crea una copia para no vaciar la cola de prioridad original del sistema.
      */
+    public List<SolicitudCredito> listarColaPrioridadOrdenada() {
+        PriorityQueue<SolicitudCredito> copiaTemporal = new PriorityQueue<>(this.colaPrioridadEvaluacion);
+        List<SolicitudCredito> resultadoOrdenado = new ArrayList<>();
+        while (!copiaTemporal.isEmpty()) {
+            resultadoOrdenado.add(copiaTemporal.poll());
+        }
+        return resultadoOrdenado;
+    }
+
     public List<SolicitudCredito> listarTodasLasSolicitudes() {
         return Collections.unmodifiableList(this.listaGeneralSolicitudes);
     }
 
-    /**
-     * Retorna el conjunto inmutable de clientes únicos registrados.
-     */
     public Set<Cliente> listarClientesRegistrados() {
         return Collections.unmodifiableSet(this.clientesRegistrados);
     }
 
-    /**
-     * Retorna una vista inmutable del mapa de solicitudes por código.
-     */
     public Map<String, SolicitudCredito> obtenerMapaSolicitudes() {
         return Collections.unmodifiableMap(this.solicitudesPorNumero);
     }
 
-    /**
-     * Verifica si un documento de cliente ya se encuentra en el HashSet.
-     */
     public boolean existeClientePorDocumento(String documento) {
         if (documento == null) return false;
         return this.documentosClientesUnicos.contains(documento.trim().toUpperCase());
@@ -264,5 +318,9 @@ public class GestorCredito {
 
     public int totalClientesRegistrados() {
         return this.clientesRegistrados.size();
+    }
+
+    public int totalSolicitudesEnColaPrioridad() {
+        return this.colaPrioridadEvaluacion.size();
     }
 }
