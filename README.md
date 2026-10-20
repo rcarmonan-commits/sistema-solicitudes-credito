@@ -229,52 +229,47 @@ SistemaCreditos/
                 └── SolicitudCreditoTest.java
 ```
 
-## Control de versiones con Git
+### Paso 5: Implementación de Control de Versiones con Git
 
-El repositorio remoto del proyecto es [sistema-solicitudes-credito](https://github.com/rcarmonan-commits/sistema-solicitudes-credito). Para desarrollar la actividad se utiliza la rama `desarrollo-ejercicio`; sus avances se publican en remoto y luego se integran en `main`. Los mensajes describen cada cambio (configuración, validaciones, registro, prioridad y documentación). Las fechas del historial corresponden a los momentos reales en que se realizaron los cambios; no se modifican para aparentar trabajo en días anteriores.
+El desarrollo del sistema se organizó en la rama `desarrollo-ejercicio` del repositorio público [sistema-solicitudes-credito](https://github.com/rcarmonan-commits/sistema-solicitudes-credito). Los cambios se registraron en commits separados por avance y la entrega se integró posteriormente en `main`.
 
-Para clonar y ejecutar:
+El historial de la rama de desarrollo permite seguir las etapas del trabajo:
+
+1. `Agregar estructura y documentacion inicial`
+2. `chore: configurar proyecto Maven para Java 17`
+3. `feat: modelar clientes y solicitudes de credito`
+4. `feat: registrar clientes y solicitudes con colecciones`
+5. `feat: priorizar solicitudes y registrar decisiones`
+6. `feat: agregar menu de gestion de creditos`
+7. `test: validar modelos y reglas de datos`
+8. `test: cubrir registro y busqueda de solicitudes`
+9. `test: verificar prioridad y transiciones de estado`
+10. `docs: presentar ejercicio 6 y explicar entrega`
+11. `docs: unificar identificacion de la actividad`
+
+Para revisar los commits y las integraciones entre ramas:
 
 ```powershell
-git clone https://github.com/rcarmonan-commits/sistema-solicitudes-credito.git
-cd sistema-solicitudes-credito
-mvn clean test
-mvn package
-java -cp target\classes sistemacreditos.Main
+git log --oneline --graph --decorate --all
 ```
 
-Para continuar el desarrollo colaborativo, cambia a la rama publicada:
+El flujo para continuar un avance en la rama de desarrollo y luego integrarlo en la principal es:
 
 ```powershell
-git switch --track origin/desarrollo-ejercicio
-```
-
-Registra y publica cada avance real:
-
-```powershell
+git switch desarrollo-ejercicio
+git pull --ff-only origin desarrollo-ejercicio
 git status
-git add .
-git commit -m "test: describir el avance realizado"
-git push
-```
+git add <archivos-modificados>
+git commit -m "tipo: describir el cambio realizado"
+git push origin desarrollo-ejercicio
 
-Al finalizar, integra el trabajo en la rama principal:
-
-```powershell
 git switch main
-git pull
+git pull --ff-only origin main
 git merge desarrollo-ejercicio
 git push origin main
 ```
 
-Para continuar trabajando después de la integración:
-
-```powershell
-git status
-git add .
-git commit -m "Describe el cambio realizado"
-git push
-```
+La versión integrada se encuentra en `main`; la rama `desarrollo-ejercicio` conserva la secuencia de avances del ejercicio.
 
 ## Limitaciones y mejoras futuras
 
