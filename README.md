@@ -33,7 +33,7 @@
 
 ## Presentación
 
-Hola, mi nombre es **Rosary Carmona**. En este repositorio presento el desarrollo del **Ejercicio 6: Sistema de solicitudes de crédito**, correspondiente a la Actividad 1 de la Unidad III de la asignatura Estructuras de Datos. El proyecto aplica el Java Collections Framework a un caso de gestión de clientes y solicitudes, de acuerdo con los requisitos de la actividad.
+Hola, mi nombre es **Rosary Carmona**. En este repositorio presento el desarrollo del **Ejercicio 6: Sistema de solicitudes de crédito**, correspondiente a la Actividad 3 de la Unidad III de la asignatura Estructuras de Datos. El proyecto aplica el Java Collections Framework a un caso de gestión de clientes y solicitudes, de acuerdo con los requisitos de la actividad.
 
 ## Introducción
 
