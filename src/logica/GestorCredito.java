@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Servicio central de lógica de negocio para la administración del sistema crediticio.
@@ -26,14 +27,16 @@ import java.util.Set;
  *   Controla la unicidad de los clientes según su número de documento en O(1) promedio.
  * - Requisito 3 (Búsqueda Directa por Clave - HashMap):
  *   Asocia cada código único 'numeroSolicitud' con su objeto SolicitudCredito en O(1).
+ * - Requisito 4 (Estructura con Orden Mantenido - TreeSet):
+ *   Mantiene colecciones ordenadas mediante árboles rojo-negro (Red-Black Trees) garantizando
+ *   costo temporal logarítmico O(log n) para inserciones, eliminaciones y búsquedas.
+ *   - Demostración dual:
+ *     1. Orden natural (Comparable): Ordena por 'numeroSolicitud'.
+ *     2. Orden con Comparator compuesto (ComparadorMontoCredito): Ordena por monto financiero
+ *        descendente con desempate obligatorio por código para evitar pérdida de registros.
  * - Requisito 5 (Procesamiento por Prioridad - PriorityQueue):
  *   Gestiona la cola de evaluación bancaria mediante un montículo binario (heap) gobernado
  *   por ComparadorPrioridadEvaluacion.
- *   - ¿Por qué no FIFO ordinaria?: En banca, los casos de alta prioridad o urgencia deben ser
- *     estudiados con prelación antes que trámites ordinarios registrados previamente.
- *   - ¿Cómo determina cuál sale primero?: La PriorityQueue evalúa la cima del heap binario.
- *     El Comparator ubica en la raíz la solicitud con mayor peso jerárquico (URGENTE > ALTA > MEDIA > BAJA),
- *     desempatando por orden cronológico de llegada (FIFO) ante empates de nivel.
  */
 public class GestorCredito {
 
@@ -104,20 +107,15 @@ public class GestorCredito {
                     "Ya existe una solicitud radicada con el número [" + codigo + "].");
         }
 
-        // Si el cliente no estaba en el Set, se registra asegurando integridad referencial
         Cliente cliente = solicitud.getCliente();
         if (!this.documentosClientesUnicos.contains(cliente.getNumeroDocumento())) {
             this.documentosClientesUnicos.add(cliente.getNumeroDocumento());
             this.clientesRegistrados.add(cliente);
         }
 
-        // Sincronización en la lista general (Requisito 1)
         this.listaGeneralSolicitudes.add(solicitud);
-
-        // Sincronización en el índice de búsqueda Map (Requisito 3)
         this.solicitudesPorNumero.put(codigo, solicitud);
 
-        // Si requiere trámite de evaluación, se encola en la PriorityQueue (Requisito 5)
         if (solicitud.getEstado() == EstadoSolicitud.PENDIENTE || solicitud.getEstado() == EstadoSolicitud.EN_EVALUACION) {
             this.colaPrioridadEvaluacion.add(solicitud);
         }
@@ -149,12 +147,49 @@ public class GestorCredito {
     }
 
     /**
+     * Requisito 4: Obtiene la cartera de solicitudes ordenada de forma permanente por monto financiero descendente.
+     * 
+     * Demostración para sustentación:
+     * Utiliza un TreeSet respaldado por un árbol rojo-negro (Red-Black Tree) con ComparadorMontoCredito.
+     * Garantiza inserción y ordenamiento en O(log n) resolviendo empates de monto mediante el código
+     * para que ningún registro sea descartado.
+     * 
+     * @return Conjunto ordenado inmutable por monto descendente.
+     */
+    public Set<SolicitudCredito> obtenerCarteraOrdenadaPorMonto() {
+        Set<SolicitudCredito> carteraOrdenada = new TreeSet<>(new ComparadorMontoCredito());
+        carteraOrdenada.addAll(this.listaGeneralSolicitudes);
+        return Collections.unmodifiableSet(carteraOrdenada);
+    }
+
+    /**
+     * Requisito 4 (Variante Orden Natural): Obtiene las solicitudes ordenadas según su orden natural Comparable.
+     * 
+     * Demostración para sustentación:
+     * En este caso no se pasa Comparator al constructor de TreeSet; la estructura utiliza el método
+     * compareTo() implementado en SolicitudCredito (alfabético por numeroSolicitud).
+     * 
+     * @return Conjunto ordenado inmutable por código alfanumérico.
+     */
+    public Set<SolicitudCredito> obtenerCarteraOrdenadaPorCodigo() {
+        Set<SolicitudCredito> carteraPorCodigo = new TreeSet<>(this.listaGeneralSolicitudes);
+        return Collections.unmodifiableSet(carteraPorCodigo);
+    }
+
+    /**
+     * Requisito 4 aplicado a Clientes: Retorna los clientes ordenados por documento mediante TreeSet.
+     */
+    public Set<Cliente> obtenerClientesOrdenadosPorDocumento() {
+        Set<Cliente> clientesOrdenados = new TreeSet<>(this.clientesRegistrados);
+        return Collections.unmodifiableSet(clientesOrdenados);
+    }
+
+    /**
      * Encola una solicitud existente en la PriorityQueue de evaluación crediticia.
      */
     public boolean encolarParaEvaluacion(String numeroSolicitud) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
-        
-        // Evita re-encolar si ya está en la cola
+
         if (this.colaPrioridadEvaluacion.contains(solicitud)) {
             throw new IllegalStateException("La solicitud [" + numeroSolicitud + "] ya se encuentra en la cola de evaluación.");
         }
@@ -165,8 +200,6 @@ public class GestorCredito {
 
     /**
      * Consulta la siguiente solicitud que encabeza la PriorityQueue sin retirarla (peek).
-     * 
-     * @return Próxima solicitud prioritaria a ser atendida, o null si la cola está vacía.
      */
     public SolicitudCredito consultarProximaPrioritaria() {
         return this.colaPrioridadEvaluacion.peek();
@@ -174,15 +207,6 @@ public class GestorCredito {
 
     /**
      * Despacha y atiende la siguiente solicitud prioritaria retirándola del heap con poll().
-     * Actualiza el estado y mantiene la sincronización transaccional con la lista y el mapa.
-     * 
-     * Demostración para sustentación (Requisito 5):
-     * Demuestra que el elemento extraído por poll() responde al criterio jerárquico del Comparator
-     * y no al orden cronológico simple en que fueron agregados a la cola.
-     * 
-     * @param nuevoEstado Estado definitivo asignado (APROBADA, RECHAZADA o EN_EVALUACION).
-     * @param dictamenComite Observaciones o justificación del comité crediticio.
-     * @return La solicitud evaluada y retirada de la cola prioritaria.
      */
     public SolicitudCredito atenderProximaSolicitudPrioritaria(EstadoSolicitud nuevoEstado, String dictamenComite) {
         if (this.colaPrioridadEvaluacion.isEmpty()) {
@@ -193,10 +217,8 @@ public class GestorCredito {
             throw new IllegalArgumentException("El nuevo estado no puede ser nulo.");
         }
 
-        // Extracción del elemento prioritario de la raíz del heap binario en O(log n)
         SolicitudCredito atendida = this.colaPrioridadEvaluacion.poll();
 
-        // Actualización de estado y observaciones en el objeto vivo
         atendida.setEstado(nuevoEstado);
         if (dictamenComite != null && !dictamenComite.trim().isEmpty()) {
             atendida.setObservaciones(dictamenComite.trim());
@@ -236,7 +258,6 @@ public class GestorCredito {
 
         boolean estabaEnCola = this.colaPrioridadEvaluacion.remove(solicitud);
 
-        // Retiro de la clave previa
         this.solicitudesPorNumero.remove(solicitud.getNumeroSolicitud());
 
         SolicitudCredito solicitudActualizada = new SolicitudCredito(
@@ -265,18 +286,12 @@ public class GestorCredito {
 
     /**
      * Elimina una solicitud manteniendo sincronización estricta entre todas las colecciones (Sección 13).
-     * Se desvincula del Map, del ArrayList general y de la PriorityQueue si aún estaba encolada.
      */
     public boolean eliminarSolicitud(String numeroSolicitud) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
 
-        // Desvinculación de la cola de prioridad si aún estaba pendiente
         this.colaPrioridadEvaluacion.remove(solicitud);
-
-        // Desvinculación del Map
         this.solicitudesPorNumero.remove(solicitud.getNumeroSolicitud());
-
-        // Desvinculación de la lista general
         this.listaGeneralSolicitudes.remove(solicitud);
 
         return true;
@@ -284,7 +299,6 @@ public class GestorCredito {
 
     /**
      * Retorna una lista con los elementos actuales de la PriorityQueue ordenados según su turno de atención.
-     * Crea una copia para no vaciar la cola de prioridad original del sistema.
      */
     public List<SolicitudCredito> listarColaPrioridadOrdenada() {
         PriorityQueue<SolicitudCredito> copiaTemporal = new PriorityQueue<>(this.colaPrioridadEvaluacion);
