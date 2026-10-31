@@ -2,6 +2,7 @@ package logica;
 
 import modelo.Cliente;
 import modelo.EstadoSolicitud;
+import modelo.NivelPrioridad;
 import modelo.SolicitudCredito;
 
 import java.math.BigDecimal;
@@ -28,15 +29,13 @@ import java.util.TreeSet;
  * - Requisito 3 (Búsqueda Directa por Clave - HashMap):
  *   Asocia cada código único 'numeroSolicitud' con su objeto SolicitudCredito en O(1).
  * - Requisito 4 (Estructura con Orden Mantenido - TreeSet):
- *   Mantiene colecciones ordenadas mediante árboles rojo-negro (Red-Black Trees) garantizando
- *   costo temporal logarítmico O(log n) para inserciones, eliminaciones y búsquedas.
- *   - Demostración dual:
- *     1. Orden natural (Comparable): Ordena por 'numeroSolicitud'.
- *     2. Orden con Comparator compuesto (ComparadorMontoCredito): Ordena por monto financiero
- *        descendente con desempate obligatorio por código para evitar pérdida de registros.
+ *   Mantiene colecciones ordenadas mediante árboles balanceados Red-Black O(log n).
  * - Requisito 5 (Procesamiento por Prioridad - PriorityQueue):
  *   Gestiona la cola de evaluación bancaria mediante un montículo binario (heap) gobernado
  *   por ComparadorPrioridadEvaluacion.
+ * - Sección 13 (Consistencia y Sincronización entre Colecciones):
+ *   Garantiza que cualquier mutación de prioridad, cambio de estado, cancelación o eliminación
+ *   actualice en tiempo real todas las estructuras involucradas, neutralizando estados inconsistentes.
  */
 public class GestorCredito {
 
@@ -65,10 +64,6 @@ public class GestorCredito {
 
     /**
      * Registra un nuevo cliente en el sistema verificando que su documento no exista previamente.
-     * 
-     * @param nuevoCliente Cliente a registrar.
-     * @return true si el cliente fue registrado con éxito.
-     * @throws ClienteDuplicadoException si el documento ya se encuentra registrado.
      */
     public boolean registrarCliente(Cliente nuevoCliente) {
         if (nuevoCliente == null) {
@@ -90,10 +85,6 @@ public class GestorCredito {
     /**
      * Radica una nueva solicitud de crédito sincronizándola en la lista general, en el Map
      * y, si su estado inicial es PENDIENTE o EN_EVALUACION, en la PriorityQueue de evaluación.
-     * 
-     * @param solicitud Solicitud a radicar.
-     * @return true si la solicitud fue registrada.
-     * @throws SolicitudDuplicadaException si el código ya existe en el HashMap.
      */
     public boolean radicarSolicitud(SolicitudCredito solicitud) {
         if (solicitud == null) {
@@ -125,10 +116,6 @@ public class GestorCredito {
 
     /**
      * Búsqueda directa por identificador en tiempo O(1) promedio utilizando el HashMap.
-     * 
-     * @param numeroSolicitud Código único a buscar.
-     * @return Objeto SolicitudCredito encontrado.
-     * @throws SolicitudNoEncontradaException si la clave no existe en el Map.
      */
     public SolicitudCredito buscarSolicitudPorNumero(String numeroSolicitud) {
         if (numeroSolicitud == null || numeroSolicitud.trim().isEmpty()) {
@@ -148,13 +135,6 @@ public class GestorCredito {
 
     /**
      * Requisito 4: Obtiene la cartera de solicitudes ordenada de forma permanente por monto financiero descendente.
-     * 
-     * Demostración para sustentación:
-     * Utiliza un TreeSet respaldado por un árbol rojo-negro (Red-Black Tree) con ComparadorMontoCredito.
-     * Garantiza inserción y ordenamiento en O(log n) resolviendo empates de monto mediante el código
-     * para que ningún registro sea descartado.
-     * 
-     * @return Conjunto ordenado inmutable por monto descendente.
      */
     public Set<SolicitudCredito> obtenerCarteraOrdenadaPorMonto() {
         Set<SolicitudCredito> carteraOrdenada = new TreeSet<>(new ComparadorMontoCredito());
@@ -164,12 +144,6 @@ public class GestorCredito {
 
     /**
      * Requisito 4 (Variante Orden Natural): Obtiene las solicitudes ordenadas según su orden natural Comparable.
-     * 
-     * Demostración para sustentación:
-     * En este caso no se pasa Comparator al constructor de TreeSet; la estructura utiliza el método
-     * compareTo() implementado en SolicitudCredito (alfabético por numeroSolicitud).
-     * 
-     * @return Conjunto ordenado inmutable por código alfanumérico.
      */
     public Set<SolicitudCredito> obtenerCarteraOrdenadaPorCodigo() {
         Set<SolicitudCredito> carteraPorCodigo = new TreeSet<>(this.listaGeneralSolicitudes);
@@ -225,6 +199,61 @@ public class GestorCredito {
         }
 
         return atendida;
+    }
+
+    /**
+     * Modificación de Prioridad con Reestructuración del Heap (Sección 13 - Consistencia):
+     * 
+     * Pregunta de sustentación:
+     * ¿Qué ocurre si se modifica la prioridad de un objeto dentro de la PriorityQueue?
+     * La cola de prioridad NO detecta automáticamente cambios internos de atributos en objetos
+     * ya insertados en el montículo. Si solo mutáramos el objeto con setPrioridad(), su posición
+     * en el árbol binario quedaría desordenada e incorrecta.
+     * 
+     * Solución de ingeniería:
+     * 1. Extraemos temporalmente el objeto de la cola (cola.remove(solicitud)).
+     * 2. Mutamos la prioridad en el objeto.
+     * 3. Lo reinsertamos (cola.add(solicitud)), forzando el sift-up / sift-down que reubica
+     *    la solicitud en su nueva posición exacta dentro del heap según el nuevo peso.
+     * 
+     * @param numeroSolicitud Código de la solicitud.
+     * @param nuevaPrioridad Nuevo nivel jerárquico.
+     * @param motivo Justificación del cambio.
+     */
+    public void actualizarPrioridadSolicitud(String numeroSolicitud, NivelPrioridad nuevaPrioridad, String motivo) {
+        SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
+        if (nuevaPrioridad == null) {
+            throw new IllegalArgumentException("La nueva prioridad no puede ser nula.");
+        }
+
+        boolean estabaEnCola = this.colaPrioridadEvaluacion.remove(solicitud);
+        solicitud.setPrioridad(nuevaPrioridad);
+
+        if (motivo != null && !motivo.trim().isEmpty()) {
+            solicitud.setObservaciones(solicitud.getObservaciones() + " | Cambio de prioridad: " + motivo.trim());
+        }
+
+        if (estabaEnCola) {
+            this.colaPrioridadEvaluacion.add(solicitud);
+        }
+    }
+
+    /**
+     * Cancelación de solicitud manteniendo la sincronización entre colecciones (Sección 13):
+     * Si un crédito se cancela, debe retirarse de inmediato de la PriorityQueue de créditos
+     * por evaluar, actualizando su estado a CANCELADA en el Map y la lista general.
+     */
+    public void cancelarSolicitud(String numeroSolicitud, String motivoCancelacion) {
+        SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
+
+        // Se retira de la cola de evaluación activa
+        this.colaPrioridadEvaluacion.remove(solicitud);
+
+        // Se actualiza su estado en el objeto compartido
+        solicitud.setEstado(EstadoSolicitud.CANCELADA);
+        if (motivoCancelacion != null && !motivoCancelacion.trim().isEmpty()) {
+            solicitud.setObservaciones(solicitud.getObservaciones() + " | Cancelada: " + motivoCancelacion.trim());
+        }
     }
 
     /**
@@ -285,7 +314,7 @@ public class GestorCredito {
     }
 
     /**
-     * Elimina una solicitud manteniendo sincronización estricta entre todas las colecciones (Sección 13).
+     * Elimina una solicitud definitivamente desvinculándola de todas las estructuras (Sección 12 y 13).
      */
     public boolean eliminarSolicitud(String numeroSolicitud) {
         SolicitudCredito solicitud = buscarSolicitudPorNumero(numeroSolicitud);
@@ -295,6 +324,33 @@ public class GestorCredito {
         this.listaGeneralSolicitudes.remove(solicitud);
 
         return true;
+    }
+
+    /**
+     * Diagnóstico de consistencia y sincronización entre colecciones (Sección 13):
+     * Valida que las colecciones no contengan desbordes ni desajustes entre sus tamaños.
+     */
+    public String obtenerDiagnosticoConsistencia() {
+        int tamanoLista = this.listaGeneralSolicitudes.size();
+        int tamanoMap = this.solicitudesPorNumero.size();
+        int tamanoCola = this.colaPrioridadEvaluacion.size();
+        int tamanoClientesSet = this.clientesRegistrados.size();
+        int tamanoDocumentosSet = this.documentosClientesUnicos.size();
+
+        boolean sincroniaListaMap = (tamanoLista == tamanoMap);
+        boolean sincroniaClientes = (tamanoClientesSet == tamanoDocumentosSet);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== DIAGNÓSTICO DE CONSISTENCIA DE COLECCIONES ===\n");
+        sb.append(String.format("- Total solicitudes en historial (ArrayList): %d\n", tamanoLista));
+        sb.append(String.format("- Total solicitudes en índice O(1) (HashMap):  %d\n", tamanoMap));
+        sb.append(String.format("- Total solicitudes en cola activa (PriorityQueue): %d\n", tamanoCola));
+        sb.append(String.format("- Total clientes únicos registrados (HashSet): %d\n", tamanoClientesSet));
+        sb.append(String.format("- Total documentos controlados (HashSet):     %d\n", tamanoDocumentosSet));
+        sb.append(String.format("- Sincronía ArrayList <-> HashMap: %s\n", sincroniaListaMap ? "CORRECTA [OK]" : "DESFASADA [ERROR]"));
+        sb.append(String.format("- Sincronía Clientes <-> Documentos: %s\n", sincroniaClientes ? "CORRECTA [OK]" : "DESFASADA [ERROR]"));
+        sb.append("==================================================");
+        return sb.toString();
     }
 
     /**
